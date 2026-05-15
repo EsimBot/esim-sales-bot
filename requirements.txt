@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-telegram-bot[job-queue]
+psycopg
+requests
+fpdf2

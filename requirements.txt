@@ -5,3 +5,4 @@ python-telegram-bot[job-queue]
 psycopg
 requests
 fpdf2
+psycopg-pool

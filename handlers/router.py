@@ -106,6 +106,7 @@ purchase_router = ConversationHandler(
         CommandHandler("cancel", back_to_main),
         CallbackQueryHandler(debug_fallback)
     ],
+    per_message=True,
     allow_reentry=True
 )
 

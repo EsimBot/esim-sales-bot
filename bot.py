@@ -18,7 +18,7 @@ from utils.db import (
     expire_old_orders
 )
 from handlers.start import start
-from handlers.router import purchase_router, admin_router
+from handlers.router import purchase_router, admin_router, control_panel_router
 
 # Import support handlers directly from your support script
 from support_bot import start as support_start, handle_user_message, handle_admin_reply
@@ -78,7 +78,7 @@ async def startup_event():
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(purchase_router)
     telegram_app.add_handler(admin_router)
-
+    telegram_app.add_handler(control_panel_router)
     await telegram_app.initialize()
     telegram_app.job_queue.run_repeating(check_expirations, interval=1800, first=10)
     await telegram_app.updater.start_polling()

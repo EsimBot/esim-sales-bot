@@ -439,6 +439,38 @@ def get_user_by_topic(topic_id):
             result = cur.fetchone()
             return result[0] if result else None         
         
+def get_admin_stats():
+    """Fetches global statistics for the admin dashboard."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM users")
+            total_users = cur.fetchone()[0]
+            
+            cur.execute("SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE status IN ('completed', 'mempool_credited')")
+            total_revenue = cur.fetchone()[0]
+            
+            # Count Active and Expired eSIMs
+            cur.execute("SELECT COUNT(*) FROM orders WHERE status = 'delivered'")
+            active_esims = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM orders WHERE status = 'expired'")
+            expired_esims = cur.fetchone()[0]
+            
+            return total_users, total_revenue, active_esims, expired_esims
+
+def check_user_exists(user_id):
+    """Verifies if a user ID is actually in the database."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM users WHERE user_id = %s", (user_id,))
+            return cur.fetchone() is not None
+
+def get_all_user_ids():
+    """Fetches every registered user ID for global broadcasts."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM users")
+            return [row[0] for row in cur.fetchall()]        
 
 def close_db():
     """Closes the connection pool gracefully."""

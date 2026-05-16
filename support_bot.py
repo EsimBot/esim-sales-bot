@@ -37,7 +37,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return
             except Exception as copy_error:
                 print(f"⚠️ Stored topic {topic_id} is dead or was deleted ({copy_error}). Clearing and generating a fresh one...")
-                topic_id = None # Clear it so the creation loop below runs
+                topic_id = None # Force the creation loop below to run
 
         # 🆕 CREATION FLOW: Run this if no topic exists or if the old one was deleted
         if not topic_id:
@@ -88,9 +88,8 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     
-    # 🎯 FIX: Changed filters.ChatType.PRIVATE to filters.Chat.PRIVATE so it catches messages!
+    # 🎯 FIXED FILTER TYPE
     app.add_handler(MessageHandler(filters.Chat.PRIVATE & ~filters.COMMAND, handle_user_message))
-    
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID), handle_admin_reply))
 
     print("📬 Support Relay Bot is running...")

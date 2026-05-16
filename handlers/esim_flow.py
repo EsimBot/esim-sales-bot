@@ -44,15 +44,18 @@ async def handle_buy_esim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if pending:
         return await show_interceptor_screen(update, context, pending, next_action="buyesim")
     
-    # ✂️ GATEKEEPER REMOVED FROM HERE
+    text = "🌍 <b>Select Region</b>\nChoose the area for your eSIM:"
+    markup = region_menu()
     
-    await update.message.reply_text(
-        "🌍 <b>Select Region</b>\nChoose the area for your eSIM:",
-        reply_markup=region_menu(),
-        parse_mode="HTML"
-    )
+    # 🎯 FIX: Check if the update is coming from an inline button click
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        # If they typed a text command or triggered it via text keypad button
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+        
     return SELECTING_REGION
-
 
 async def handle_usa_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User clicked the 'region_usa' button"""

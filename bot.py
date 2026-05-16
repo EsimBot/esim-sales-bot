@@ -10,18 +10,20 @@ from telegram.request import HTTPXRequest
 # Import config variables
 from config import (
     BOT_TOKEN, PAYMENT_ALERTS_GROUP_ID, 
-    SUPPORT_BOT_TOKEN, SUPPORT_GROUP_ID
+    SUPPORT_BOT_TOKEN, SUPPORT_GROUP_ID,
+    STATISTICS_GROUP_ID  # 🎯 IMPORTED NEW VARIABLE
 )
 from utils.db import (
     init_db, close_db, handle_payment_status, 
     get_user_payment_topic, set_user_payment_topic,
-    expire_old_orders
+    expire_old_orders,
+    get_admin_stats  # 🎯 IMPORTED STATS QUERY FUNCTION
 )
-from handlers.start import start
 from handlers.router import purchase_router, admin_router, control_panel_router
 
 # Import support handlers directly from your support script
 from support_bot import start as support_start, handle_user_message, handle_admin_reply
+from handlers.start import start
 
 # 1. Setup logging
 logging.basicConfig(
@@ -57,6 +59,33 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"⚠️ Failed to send expiration notice to {user_id}: {e}")
 
+# 🎯 NEW: AUTOMATED STATS POSTING JOB
+async def send_automated_stats(context: ContextTypes.DEFAULT_TYPE):
+    """Gathers database metrics and logs them directly to your dedicated stats group chat."""
+    if not STATISTICS_GROUP_ID:
+        return
+    try:
+        total_users, total_revenue, active_esims, expired_esims = get_admin_stats()
+        
+        text = (
+            "📊 <b>Automated Store Statistics Update</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"👥 <b>Total Registered Users:</b> <code>{total_users}</code>\n"
+            f"💰 <b>Total Gross Revenue:</b> <code>${total_revenue:.2f}</code>\n\n"
+            f"🟢 <b>Active eSIM Deliveries:</b> <code>{active_esims}</code>\n"
+            f"🔴 <b>Expired/Dead Invoices:</b> <code>{expired_esims}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "<i>🤖 Next automated report scheduled in 12 hours.</i>"
+        )
+        await context.bot.send_message(
+            chat_id=STATISTICS_GROUP_ID,
+            text=text,
+            parse_mode="HTML"
+        )
+        print("✅ Posted automated health metrics to the Statistics Group.")
+    except Exception as e:
+        print(f"⚠️ Statistics group relay failure: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     """This runs when the server starts"""
@@ -79,8 +108,16 @@ async def startup_event():
     telegram_app.add_handler(purchase_router)
     telegram_app.add_handler(admin_router)
     telegram_app.add_handler(control_panel_router)
+    
     await telegram_app.initialize()
+    
+    # 🛠️ Register Background Jobs
     telegram_app.job_queue.run_repeating(check_expirations, interval=1800, first=10)
+    
+    # 🎯 Trigger stats report 15 seconds after booting up, then every 12 hours (43200 seconds)
+    if STATISTICS_GROUP_ID:
+        telegram_app.job_queue.run_repeating(send_automated_stats, interval=43200, first=15)
+        
     await telegram_app.updater.start_polling()
     await telegram_app.start()
     print("🚀 Main eSIM Bot & FastAPI are live!")
@@ -92,7 +129,7 @@ async def startup_event():
         support_app = ApplicationBuilder().token(SUPPORT_BOT_TOKEN).request(request_config).build()
         
         support_app.add_handler(CommandHandler("start", support_start))
-        support_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_user_message))
+        support_app.add_handler(MessageHandler(filters.Chat.PRIVATE & ~filters.COMMAND, handle_user_message))
         support_app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID), handle_admin_reply))
         
         await support_app.initialize()

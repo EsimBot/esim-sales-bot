@@ -44,30 +44,15 @@ async def handle_buy_esim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if pending:
         return await show_interceptor_screen(update, context, pending, next_action="buyesim")
     
-    # 🎯 2. NEW: Check if user is activated (has ever topped up)
-    if CHECK_ACTIVATION and not is_user_activated(user_id):
-        text = (
-            "👋 <b>First-Time Activation Required</b>\n\n"
-            "To activate your account, please make your first deposit of at least <b>$6.00</b>.\n\n"
-            "✨ <b>Why?</b>\n"
-            "This is a one-time requirement to verify your account. "
-            "The money will be <b>added to your balance</b> immediately and can be used to buy any eSIM!\n\n"
-            "<i>Note: Once you top up once, you will never see this message again.</i>"
-        )
-        btns = [[
-            InlineKeyboardButton("💎 Activate & Top Up Now", callback_data="view_wallet"),
-        ]]
-        
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML")
-        # We don't return SELECTING_REGION here, so they stay on this screen
-        return ConversationHandler.END
-
+    # ✂️ GATEKEEPER REMOVED FROM HERE
+    
     await update.message.reply_text(
         "🌍 <b>Select Region</b>\nChoose the area for your eSIM:",
         reply_markup=region_menu(),
         parse_mode="HTML"
     )
     return SELECTING_REGION
+
 
 async def handle_usa_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User clicked the 'region_usa' button"""
@@ -104,8 +89,27 @@ def renewal_type_keyboard():
 async def handle_renewal_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
     
-    # Save the renewal choice
+    # 🛑 THE GATEKEEPER HAS BEEN MOVED HERE
+    if CHECK_ACTIVATION and not is_user_activated(user_id):
+        text = (
+            "👋 <b>First-Time Activation Required</b>\n\n"
+            "To activate your account, please make your first deposit of at least <b>$6.00</b>.\n\n"
+            "✨ <b>Why?</b>\n"
+            "This is a one-time requirement to verify your account. "
+            "The money will be <b>added to your balance</b> immediately and can be used to buy any eSIM!\n\n"
+            "<i>Note: Once you top up once, you will never see this message again.</i>"
+        )
+        btns = [[
+            InlineKeyboardButton("💎 Activate & Top Up Now", callback_data="view_wallet"),
+        ]]
+        
+        # Use query.edit_message_text because they clicked an inline button
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML")
+        return ConversationHandler.END
+
+    # Save the renewal choice if they pass the gate
     context.user_data['is_renewable'] = (query.data == "renewal_true")
     
     await query.edit_message_text(

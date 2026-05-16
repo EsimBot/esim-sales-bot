@@ -129,7 +129,7 @@ async def startup_event():
         support_app = ApplicationBuilder().token(SUPPORT_BOT_TOKEN).request(request_config).build()
         
         support_app.add_handler(CommandHandler("start", support_start))
-        support_app.add_handler(MessageHandler(filters.Chat.PRIVATE & ~filters.COMMAND, handle_user_message))
+        support_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_user_message))
         support_app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID), handle_admin_reply))
         
         await support_app.initialize()

@@ -89,7 +89,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     
     # 🎯 FIXED FILTER TYPE
-    app.add_handler(MessageHandler(filters.Chat.PRIVATE & ~filters.COMMAND, handle_user_message))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_user_message))
     app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID), handle_admin_reply))
 
     print("📬 Support Relay Bot is running...")

@@ -15,4 +15,4 @@ PAYMENT_ALERTS_GROUP_ID = int(os.getenv("PAYMENT_ALERTS_GROUP_ID")) if os.getenv
 SUPPORT_BOT_TOKEN = os.getenv("SUPPORT_BOT_TOKEN")
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID")) if os.getenv("SUPPORT_GROUP_ID") else None
 SUPPORT_BOT_URL = os.getenv("SUPPORT_BOT_URL")
-CHECK_ACTIVATION = os.getenv("CHECK_ACTIVATION", "True").lower() == "true"
+CHECK_ACTIVATION = os.getenv("CHECK_ACTIVATION", "True").lower() == "false"

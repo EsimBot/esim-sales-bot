@@ -11,13 +11,13 @@ from telegram.request import HTTPXRequest
 from config import (
     BOT_TOKEN, PAYMENT_ALERTS_GROUP_ID, 
     SUPPORT_BOT_TOKEN, SUPPORT_GROUP_ID,
-    STATISTICS_GROUP_ID  # 🎯 IMPORTED NEW VARIABLE
+    STATISTICS_GROUP_ID
 )
 from utils.db import (
     init_db, close_db, handle_payment_status, 
     get_user_payment_topic, set_user_payment_topic,
     expire_old_orders,
-    get_admin_stats  # 🎯 IMPORTED STATS QUERY FUNCTION
+    get_admin_stats
 )
 from handlers.router import purchase_router, admin_router, control_panel_router
 
@@ -36,6 +36,38 @@ app = FastAPI()
 telegram_app = None
 support_app = None  # Track the support bot instance here
 
+# 🎯 ASYNC CRASH ENGINE NATIVE TO THE APPLICATION CONTEXT
+async def send_crash_alert(context_name: str, error: Exception):
+    """Gathers errors across the bot framework and dispatches a live traceback notification inside Telegram."""
+    import traceback
+    if not PAYMENT_ALERTS_GROUP_ID or not telegram_app:
+        return
+        
+    tb_lines = traceback.format_exception(type(error), error, error.__traceback__)
+    tb_text = "".join(tb_lines)
+    
+    if len(tb_text) > 3500:
+        tb_text = tb_text[-3500:]
+        
+    error_message = (
+        f"💥 <b>CRITICAL APPLICATION CRASH ALERT</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⚙️ <b>Context:</b> <code>{context_name}</code>\n"
+        f"🚨 <b>Reason:</b> <code>{str(error)}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💻 <b>Stack Trace:</b>\n"
+        f"<pre><code class='language-python'>{tb_text}</code></pre>"
+    )
+    
+    try:
+        await telegram_app.bot.send_message(
+            chat_id=PAYMENT_ALERTS_GROUP_ID,
+            text=error_message,
+            parse_mode="HTML"
+        )
+    except Exception as telegram_fail:
+        print(f"🔥 Fail-safe alert mechanism collapsed: {telegram_fail}")
+
 async def post_init(application):
     await application.bot.set_my_commands([
         BotCommand("start", "🏠 Return to Main Menu")
@@ -43,23 +75,25 @@ async def post_init(application):
     
 async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
     """Background task that runs every 30 mins to clean up dead invoices."""
-    expired_list = expire_old_orders()
-    if expired_list:
-        print(f"🧹 Cleaned up {len(expired_list)} expired orders.")
-    for order in expired_list:
-        try:
-            user_id = order['user_id']
-            order_id = order['order_id']
-            text = (
-                f"<b>⚠️ Invoice Expired</b>\n\n"
-                f"🚨 <i>Your deposit order <code>#{order_id}</code> has been cancelled because the 59-minute payment window closed.</i>\n\n"
-                f"To try again, please click 💰 <b>Credits</b> to generate a new invoice."
-            )
-            await context.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
-        except Exception as e:
-            print(f"⚠️ Failed to send expiration notice to {user_id}: {e}")
+    try:
+        expired_list = expire_old_orders()
+        if expired_list:
+            print(f"🧹 Cleaned up {len(expired_list)} expired orders.")
+        for order in expired_list:
+            try:
+                user_id = order['user_id']
+                order_id = order['order_id']
+                text = (
+                    f"<b>⚠️ Invoice Expired</b>\n\n"
+                    f"🚨 <i>Your deposit order <code>#{order_id}</code> has been cancelled because the 59-minute payment window closed.</i>\n\n"
+                    f"To try again, please click 💰 <b>Credits</b> to generate a new invoice."
+                )
+                await context.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+            except Exception as e:
+                print(f"⚠️ Failed to send expiration notice to {user_id}: {e}")
+    except Exception as background_error:
+        await send_crash_alert("Background Task: check_expirations", background_error)
 
-# 🎯 NEW: AUTOMATED STATS POSTING JOB
 async def send_automated_stats(context: ContextTypes.DEFAULT_TYPE):
     """Gathers database metrics and logs them directly to your dedicated stats group chat."""
     if not STATISTICS_GROUP_ID:
@@ -83,8 +117,13 @@ async def send_automated_stats(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         print("✅ Posted automated health metrics to the Statistics Group.")
-    except Exception as e:
-        print(f"⚠️ Statistics group relay failure: {e}")
+    except Exception as stats_error:
+        await send_crash_alert("Background Task: send_automated_stats", stats_error)
+
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Intercepts unexpected internal framework runtime crashes and alerts the team."""
+    logging.error(msg="Exception occurred while handling an update:", exc_info=context.error)
+    await send_crash_alert(f"Telegram Handler (Update Type: {type(update).__name__})", context.error)
 
 @app.on_event("startup")
 async def startup_event():
@@ -109,12 +148,11 @@ async def startup_event():
     telegram_app.add_handler(admin_router)
     telegram_app.add_handler(control_panel_router)
     
-    await telegram_app.initialize()
+    telegram_app.add_error_handler(global_error_handler)
     
-    # 🛠️ Register Background Jobs
+    await telegram_app.initialize()
     telegram_app.job_queue.run_repeating(check_expirations, interval=1800, first=10)
     
-    # 🎯 Trigger stats report 15 seconds after booting up, then every 12 hours (43200 seconds)
     if STATISTICS_GROUP_ID:
         telegram_app.job_queue.run_repeating(send_automated_stats, interval=43200, first=15)
         
@@ -131,6 +169,8 @@ async def startup_event():
         support_app.add_handler(CommandHandler("start", support_start))
         support_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_user_message))
         support_app.add_handler(MessageHandler(filters.Chat(SUPPORT_GROUP_ID), handle_admin_reply))
+        
+        support_app.add_error_handler(global_error_handler)
         
         await support_app.initialize()
         await support_app.updater.start_polling()
@@ -188,10 +228,11 @@ async def plisio_webhook(request: Request):
                     text=admin_text,
                     parse_mode="HTML"
                 )
-    except Exception as e:
+    except Exception as webhook_error:
         print("❌ WEBHOOK CRASHED:")
         traceback.print_exc()
-        return {"status": "error", "message": str(e)}
+        await send_crash_alert("FastAPI Endpoint: /plisio/webhook", webhook_error)
+        return {"status": "error", "message": str(webhook_error)}
     return {"status": "ok"}
 
 if __name__ == "__main__":

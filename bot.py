@@ -40,7 +40,9 @@ support_app = None  # Track the support bot instance here
 async def send_crash_alert(context_name: str, error: Exception):
     """Gathers errors across the bot framework and dispatches a live traceback notification inside Telegram."""
     import traceback
-    if not PAYMENT_ALERTS_GROUP_ID or not telegram_app:
+    
+    # 🎯 FIX 1: Check for the Statistics Group instead of Payment Alerts
+    if not STATISTICS_GROUP_ID or not telegram_app:
         return
         
     tb_lines = traceback.format_exception(type(error), error, error.__traceback__)
@@ -61,7 +63,7 @@ async def send_crash_alert(context_name: str, error: Exception):
     
     try:
         await telegram_app.bot.send_message(
-            chat_id=PAYMENT_ALERTS_GROUP_ID,
+            chat_id=STATISTICS_GROUP_ID, # 🎯 FIX 2: Route directly to Statistics Group
             text=error_message,
             parse_mode="HTML"
         )

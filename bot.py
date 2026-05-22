@@ -196,9 +196,21 @@ async def shutdown_event():
 @app.post("/plisio/webhook")
 async def plisio_webhook(request: Request):
     try:
-        form_data = await request.form()
-        order_id = form_data.get("order_number")
-        status = form_data.get("status")
+        # 🎯 FIX 1: Read both JSON and Form payloads properly
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            payload = await request.json()
+        else:
+            form = await request.form()
+            payload = dict(form)
+
+        # Extract safely regardless of Plisio's naming conventions
+        order_id = payload.get("order_number") or payload.get("orderNumber") or payload.get("order_id")
+        status = payload.get("status") or payload.get("state")
+
+        if not order_id:
+            print(f"⚠️ Webhook Ignored: No order ID found in payload.")
+            return {"status": "ignored"}
 
         should_alert, user_id, amount, currency, coin_amount = handle_payment_status(order_id, status)
 

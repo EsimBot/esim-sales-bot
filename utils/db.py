@@ -252,6 +252,13 @@ def handle_payment_status(order_id, plisio_status):
                 amount = float(row['amount'])
                 currency = row['currency']
                 coin_amount = row['coin_amount']
+                
+                # 🛡️ THE GHOST FIX: Ensure user exists in the DB before trying to give them money
+                cur.execute("""
+                    INSERT INTO users (user_id, username, balance) 
+                    VALUES (%s, 'Auto_Recovered', 0.00) 
+                    ON CONFLICT (user_id) DO NOTHING
+                """, (user_id,))
 
                 # 🚀 2. Detect and Credit on Mempool (Instant Credit)
                 if plisio_status == 'mempool' and db_status == 'pending':
@@ -295,7 +302,7 @@ def handle_payment_status(order_id, plisio_status):
                 return False, None, None, None, None
     except Exception as e:
         print(f"🔥 DB Logic Error: {e}")
-        return False, None, None, None, None    
+        return False, None, None, None, None
 
 def is_user_activated(user_id):
     """Checks if the user has ever completed a deposit."""

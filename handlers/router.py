@@ -166,10 +166,13 @@ control_panel_router = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, receive_message_text),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ],
+        
         ADMIN_BROADCAST_INPUT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_broadcast_text),
+            # 🎯 FIX: Listen for both Text and Photos for mass broadcasting
+            MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, receive_broadcast_text),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ],
+        
         ADMIN_BROADCAST_CONFIRM: [
             CallbackQueryHandler(confirm_broadcast, pattern="^confirm_broadcast$"),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")

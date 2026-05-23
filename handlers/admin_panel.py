@@ -117,42 +117,102 @@ async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADMIN_BROADCAST_INPUT
 
 async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['broadcast_text'] = update.message.text
+    """Captures the broadcast payload (handles text, photos, and photo captions)."""
+    msg = update.effective_message
     
-    text = (
-        "⚠️ <b>BROADCAST PREVIEW</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"{update.message.text}\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "Are you sure you want to send this to ALL users?"
+    # 🎯 Capture text or photo details
+    if msg.photo:
+        # Get the highest resolution version of the photo
+        context.user_data['broadcast_photo'] = msg.photo[-1].file_id
+        context.user_data['broadcast_text'] = msg.caption or ""
+        preview_type = "🖼️ PHOTO WITH CAPTION" if msg.caption else "🖼️ PURE PHOTO (NO TEXT)"
+    else:
+        context.user_data['broadcast_photo'] = None
+        context.user_data['broadcast_text'] = msg.text
+        preview_type = "📝 TEXT ONLY"
+
+    text_to_show = context.user_data['broadcast_text'] or "<i>(No caption text)</i>"
+    
+    preview_message = (
+        f"📢 <b>Broadcast Preview ({preview_type}):</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{text_to_show}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Do you want to send this to ALL registered users?"
     )
-    btns = [
-        [InlineKeyboardButton("✅ Send Live Now", callback_data="confirm_broadcast")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="admin_home")]
-    ]
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML")
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Yes, Send It", callback_data="confirm_broadcast")],
+        [InlineKeyboardButton("❌ Cancel & Exit", callback_data="admin_home")]
+    ])
+
+    # If it's a photo, show them the exact image preview with the verification button
+    if context.user_data['broadcast_photo']:
+        await msg.reply_photo(
+            photo=context.user_data['broadcast_photo'],
+            caption=preview_message,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    else:
+        await msg.reply_text(preview_message, reply_markup=keyboard, parse_mode="HTML")
+
     return ADMIN_BROADCAST_CONFIRM
 
+
 async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Dispatches the broadcast payload to every user in the database database."""
     query = update.callback_query
-    await query.answer()
+    await query.answer("🚀 Dispatching broadcast...")
+
+    from utils.db import get_all_user_ids
+    user_ids = get_all_user_ids()
     
     broadcast_text = context.user_data.get('broadcast_text')
-    users = get_all_user_ids()
-    
-    await query.edit_message_text(f"🚀 Sending broadcast to {len(users)} users. Please wait...")
-    
-    success, fail = 0, 0
-    for u_id in users:
+    broadcast_photo = context.user_data.get('broadcast_photo')
+
+    await query.edit_message_text(f"⏳ Sending message to {len(user_ids)} users... Please wait.", parse_mode="HTML")
+
+    success_count = 0
+    fail_count = 0
+
+    for u_id in user_ids:
         try:
-            await context.bot.send_message(chat_id=u_id, text=broadcast_text, parse_mode="HTML")
-            success += 1
+            # 🎯 FIX: Dynamically send photo or text based on captured data payload
+            if broadcast_photo:
+                await context.bot.send_photo(
+                    chat_id=u_id,
+                    photo=broadcast_photo,
+                    caption=broadcast_text,
+                    parse_mode="HTML"
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=u_id,
+                    text=broadcast_text,
+                    parse_mode="HTML"
+                )
+            success_count += 1
+            await asyncio.sleep(0.05) # Prevent Telegram API flood limitations
         except Exception:
-            fail += 1
-        await asyncio.sleep(0.05) # Crucial: Prevents Telegram Flood Limits (20 msgs/sec)
-        
-    await query.message.reply_text(f"✅ <b>Broadcast Complete!</b>\n\nSent: {success}\nFailed: {fail}", parse_mode="HTML")
-    return await start_admin_panel(update, context)
+            fail_count += 1
+
+    # Cleanup memory state values
+    context.user_data.pop('broadcast_text', None)
+    context.user_data.pop('broadcast_photo', None)
+
+    summary = (
+        f"📢 <b>Broadcast Delivery Complete</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 <b>Successfully Sent:</b> <code>{success_count}</code>\n"
+        f"🔴 <b>Blocked/Failed:</b> <code>{fail_count}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+    
+    # Send summary back to admin panel view
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="admin_home")]])
+    await context.bot.send_message(chat_id=query.message.chat_id, text=summary, reply_markup=keyboard, parse_mode="HTML")
+    return ADMIN_PANEL_MAIN
 
 # --- NAVIGATION ---
 async def exit_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):

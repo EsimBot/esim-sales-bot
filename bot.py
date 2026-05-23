@@ -43,13 +43,16 @@ support_app = None  # Track the support bot instance here
 async def send_crash_alert(context_name: str, error: Exception):
     """Gathers errors across the bot framework and dispatches a live traceback notification inside Telegram."""
     import traceback
+    import html  # 🎯 FIX: Import HTML parsing library
     
-    # 🎯 FIX 1: Check for the Statistics Group instead of Payment Alerts
     if not STATISTICS_GROUP_ID or not telegram_app:
         return
         
     tb_lines = traceback.format_exception(type(error), error, error.__traceback__)
-    tb_text = "".join(tb_lines)
+    
+    # 🎯 FIX: Escape Python brackets so <11 lines> doesn't break Telegram HTML
+    tb_text = html.escape("".join(tb_lines))
+    safe_error_reason = html.escape(str(error))
     
     if len(tb_text) > 3500:
         tb_text = tb_text[-3500:]
@@ -58,7 +61,7 @@ async def send_crash_alert(context_name: str, error: Exception):
         f"💥 <b>CRITICAL APPLICATION CRASH ALERT</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"⚙️ <b>Context:</b> <code>{context_name}</code>\n"
-        f"🚨 <b>Reason:</b> <code>{str(error)}</code>\n"
+        f"🚨 <b>Reason:</b> <code>{safe_error_reason}</code>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💻 <b>Stack Trace:</b>\n"
         f"<pre><code class='language-python'>{tb_text}</code></pre>"
@@ -66,7 +69,7 @@ async def send_crash_alert(context_name: str, error: Exception):
     
     try:
         await telegram_app.bot.send_message(
-            chat_id=STATISTICS_GROUP_ID, # 🎯 FIX 2: Route directly to Statistics Group
+            chat_id=STATISTICS_GROUP_ID, 
             text=error_message,
             parse_mode="HTML"
         )

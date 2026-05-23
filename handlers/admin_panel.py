@@ -176,7 +176,7 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Dispatches the broadcast payload to every user in the database database."""
+    """Dispatches the broadcast payload to every user in the database."""
     query = update.callback_query
     await query.answer("🚀 Dispatching broadcast...")
 
@@ -185,20 +185,42 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     broadcast_text = context.user_data.get('broadcast_text')
     broadcast_photo = context.user_data.get('broadcast_photo')
+    broadcast_video = context.user_data.get('broadcast_video')
 
-    await query.edit_message_text(f"⏳ Sending message to {len(user_ids)} users... Please wait.", parse_mode="HTML")
+    # 🎯 THE FIX: Delete the photo preview instead of trying to edit it!
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+        
+    # Send a fresh text message for the loading status
+    await context.bot.send_message(
+        chat_id=query.message.chat_id, 
+        text=f"⏳ Sending message to {len(user_ids)} users... Please wait.", 
+        parse_mode="HTML"
+    )
 
     success_count = 0
     fail_count = 0
 
+    # 🛡️ SAFETY: Telegram caps media captions at 1024 characters. This prevents crashes.
+    safe_caption = broadcast_text[:1024] if broadcast_text else None
+
     for u_id in user_ids:
         try:
-            # 🎯 FIX: Dynamically send photo or text based on captured data payload
+            # 🎯 Dynamically send photo, video, or text
             if broadcast_photo:
                 await context.bot.send_photo(
                     chat_id=u_id,
                     photo=broadcast_photo,
-                    caption=broadcast_text,
+                    caption=safe_caption,
+                    parse_mode="HTML"
+                )
+            elif broadcast_video:
+                await context.bot.send_video(
+                    chat_id=u_id,
+                    video=broadcast_video,
+                    caption=safe_caption,
                     parse_mode="HTML"
                 )
             else:
@@ -210,11 +232,23 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success_count += 1
             await asyncio.sleep(0.05) # Prevent Telegram API flood limitations
         except Exception:
-            fail_count += 1
+            # 🛡️ FALLBACK: If HTML formatting has a typo, send it without HTML so it doesn't fail
+            try:
+                if broadcast_photo:
+                    await context.bot.send_photo(chat_id=u_id, photo=broadcast_photo, caption=safe_caption)
+                elif broadcast_video:
+                    await context.bot.send_video(chat_id=u_id, video=broadcast_video, caption=safe_caption)
+                else:
+                    await context.bot.send_message(chat_id=u_id, text=broadcast_text)
+                success_count += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                fail_count += 1
 
     # Cleanup memory state values
     context.user_data.pop('broadcast_text', None)
     context.user_data.pop('broadcast_photo', None)
+    context.user_data.pop('broadcast_video', None)
 
     summary = (
         f"📢 <b>Broadcast Delivery Complete</b>\n"

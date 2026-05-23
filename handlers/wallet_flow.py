@@ -70,7 +70,7 @@ async def start_topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await show_interceptor_screen(update, context, pending, next_action="topup")
 
     await query.answer()
-    await query.edit_message_text("📝 <b>Top Up</b>\n\n Minimum: <b>$10.00</b>\nEnter amount (USD):", parse_mode="HTML")
+    await query.edit_message_text("📝 <b>Top Up</b>\n\n Minimum: <b>$7.00</b>\nEnter amount (USD):", parse_mode="HTML")
     return ENTERING_AMOUNT
 
 async def receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,9 +81,14 @@ async def receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         amount = float(msg.text)
-        if amount < 10.0:
-            await msg.reply_text("❌ Minimum deposit is $10.")
+        if amount < 7.0:
+            await msg.reply_text("❌ Minimum deposit is $7.00.")
             return ENTERING_AMOUNT
+        
+        if amount > 5000.0:
+            await msg.reply_text("❌ Maximum single deposit is $5,000.\nPlease enter a smaller amount.")
+            return ENTERING_AMOUNT
+        
     except ValueError:
         await msg.reply_text("❌ Enter a valid number.")
         return ENTERING_AMOUNT
@@ -172,7 +177,7 @@ async def show_usdt_networks(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>Your Entered Deposit:</b> ${amount:.2f}\n\n"
         f"⚠️ <b>Network Rules:</b>\n"
-        f"• <b>TRC-20 (Tron):</b> $10.00 Minimum\n"
+        f"• <b>TRC-20 (Tron):</b> $7.00 Minimum\n"
         f"• <b>ERC-20 (Ethereum):</b> $12.00 Minimum\n"
         f"━━━━━━━━━━━━━━━━━━"
     )

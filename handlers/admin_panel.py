@@ -47,6 +47,10 @@ async def handle_check_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     total_users, total_revenue, active_esims, expired_esims = get_admin_stats()
     
+    # Get the current time for the refresh stamp
+    from datetime import datetime
+    now_time = datetime.now().strftime("%H:%M:%S")
+    
     text = (
         "📊 <b>Live Store Statistics</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -54,9 +58,19 @@ async def handle_check_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"💰 <b>Total Revenue:</b> ${total_revenue:.2f}\n\n"
         f"🟢 <b>Active eSIMs:</b> {active_esims}\n"
         f"🔴 <b>Expired eSIMs:</b> {expired_esims}\n"
-        "━━━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"<i>🔄 Last Refreshed: {now_time}</i>"
     )
-    await query.edit_message_text(text, reply_markup=admin_menu_markup(), parse_mode="HTML")
+    
+    try:
+        await query.edit_message_text(text, reply_markup=admin_menu_markup(), parse_mode="HTML")
+    except Exception as e:
+        # If the text is exactly the same (e.g. double clicked in the same second), just silently ignore it
+        if "not modified" in str(e).lower():
+            pass
+        else:
+            raise e
+            
     return ADMIN_PANEL_MAIN
 
 # --- MESSAGE A USER FLOW ---

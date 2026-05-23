@@ -31,6 +31,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 # 2. FastAPI Setup
 app = FastAPI()
 telegram_app = None

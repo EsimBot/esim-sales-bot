@@ -163,19 +163,21 @@ control_panel_router = ConversationHandler(
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ],
         ADMIN_MSG_TEXT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_message_text),
+            # 🎯 FIX 1: Allow the Direct Message feature to accept Photos and Videos
+            MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, receive_message_text),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ],
         
         ADMIN_BROADCAST_INPUT: [
-            # 🎯 FIX: Listen for both Text and Photos for mass broadcasting
-            MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, receive_broadcast_text),
+            MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, receive_broadcast_text),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ],
         
         ADMIN_BROADCAST_CONFIRM: [
             CallbackQueryHandler(confirm_broadcast, pattern="^confirm_broadcast$"),
-            CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
+            CallbackQueryHandler(start_admin_panel, pattern="^admin_home$"),
+            # 🎯 FIX 2: Allow you to add captions while looking at the preview screen without getting stuck
+            MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, receive_broadcast_text)
         ]
     },
     fallbacks=[CommandHandler("admin", start_admin_panel)],

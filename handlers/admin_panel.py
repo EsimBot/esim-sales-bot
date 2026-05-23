@@ -94,13 +94,28 @@ async def receive_message_user_id(update: Update, context: ContextTypes.DEFAULT_
 
 async def receive_message_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = context.user_data.get('target_msg_id')
-    msg_text = update.message.text
+    msg = update.effective_message
     
     try:
-        await context.bot.send_message(chat_id=target_id, text=f"🔔 <b>Message from Admin:</b>\n\n{msg_text}", parse_mode="HTML")
-        await update.message.reply_text("✅ Message sent successfully!")
+        # 1. Did the admin send a Photo?
+        if msg.photo:
+            photo_id = msg.photo[-1].file_id
+            caption = f"🔔 <b>Message from Admin:</b>\n\n{msg.caption}" if msg.caption else "🔔 <b>Message from Admin</b>"
+            await context.bot.send_photo(chat_id=target_id, photo=photo_id, caption=caption, parse_mode="HTML")
+            
+        # 2. Did the admin send a Video?
+        elif msg.video:
+            video_id = msg.video.file_id
+            caption = f"🔔 <b>Message from Admin:</b>\n\n{msg.caption}" if msg.caption else "🔔 <b>Message from Admin</b>"
+            await context.bot.send_video(chat_id=target_id, video=video_id, caption=caption, parse_mode="HTML")
+            
+        # 3. Just normal Text
+        elif msg.text:
+            await context.bot.send_message(chat_id=target_id, text=f"🔔 <b>Message from Admin:</b>\n\n{msg.text}", parse_mode="HTML")
+            
+        await msg.reply_text("✅ Message delivered successfully!")
     except Exception as e:
-        await update.message.reply_text(f"❌ Failed to send message: {e}")
+        await msg.reply_text(f"❌ Failed to deliver message. Error: {e}")
         
     return await start_admin_panel(update, context)
 

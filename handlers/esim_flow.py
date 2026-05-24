@@ -98,7 +98,7 @@ async def handle_renewal_selection(update: Update, context: ContextTypes.DEFAULT
     if CHECK_ACTIVATION and not is_user_activated(user_id):
         text = (
             "👋 <b>First-Time Activation Required</b>\n\n"
-            "To activate your account, please make your first deposit of at least <b>$6.00</b>.\n\n"
+            "To activate your account, please make your first deposit of at least <b>$7.00</b>.\n\n"
             "✨ <b>Why?</b>\n"
             "This is a one-time requirement to verify your account. "
             "The money will be <b>added to your balance</b> immediately and can be used to buy any eSIM!\n\n"

@@ -54,7 +54,14 @@ async def handle_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     markup = InlineKeyboardMarkup(btns)
 
     if query:
-        await query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+        # 🎯 FIX: Add the silent bypass for identical wallet refreshes
+        try:
+            await query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                pass
+            else:
+                raise e
     else:
         await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
         

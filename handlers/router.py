@@ -33,7 +33,7 @@ from handlers.admin_panel import (
     confirm_poll_broadcast, start_admin_panel, handle_check_stats, start_message_user,
     receive_message_user_id, receive_message_text, start_broadcast,
     receive_broadcast_text, confirm_broadcast,clean_blocked_users,exit_admin,
-    start_poll_wizard, receive_poll_question, receive_poll_options, confirm_poll
+    start_poll_wizard, receive_poll_question, receive_poll_options,confirm_poll_broadcast
 )
 
 # All States

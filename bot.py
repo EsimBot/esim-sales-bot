@@ -107,12 +107,14 @@ async def send_automated_stats(context: ContextTypes.DEFAULT_TYPE):
     if not STATISTICS_GROUP_ID:
         return
     try:
-        total_users, total_revenue, active_esims, expired_esims = get_admin_stats()
+        # 🎯 FIX: Added blocked_users to the unpack
+        total_users, total_revenue, active_esims, expired_esims, blocked_users = get_admin_stats()
         
         text = (
             "📊 <b>Automated Store Statistics Update</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            f"👥 <b>Total Registered Users:</b> <code>{total_users}</code>\n"
+            f"👥 <b>Total Active Users:</b> <code>{total_users}</code>\n"
+            f"🚫 <b>Blocked Users:</b> <code>{blocked_users}</code>\n"
             f"💰 <b>Total Gross Revenue:</b> <code>${total_revenue:.2f}</code>\n\n"
             f"🟢 <b>Active eSIM Deliveries:</b> <code>{active_esims}</code>\n"
             f"🔴 <b>Expired/Dead Invoices:</b> <code>{expired_esims}</code>\n"

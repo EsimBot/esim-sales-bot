@@ -32,7 +32,7 @@ from handlers.admin_fulfillment import (
 from handlers.admin_panel import (
     start_admin_panel, handle_check_stats, start_message_user,
     receive_message_user_id, receive_message_text, start_broadcast,
-    receive_broadcast_text, confirm_broadcast, exit_admin
+    receive_broadcast_text, confirm_broadcast,clean_blocked_users,exit_admin
 )
 
 # All States
@@ -156,6 +156,7 @@ control_panel_router = ConversationHandler(
             CallbackQueryHandler(start_message_user, pattern="^admin_msg_user$"),
             CallbackQueryHandler(start_broadcast, pattern="^admin_broadcast$"),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$"),
+            CallbackQueryHandler(clean_blocked_users, pattern="^admin_clean_blocked$"),
             CallbackQueryHandler(exit_admin, pattern="^admin_exit$")
         ],
         ADMIN_MSG_USER_ID: [

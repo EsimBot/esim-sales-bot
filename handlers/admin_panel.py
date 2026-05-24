@@ -1,10 +1,10 @@
-# handlers/admin_panel.py
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.error import Forbidden
 from config import ADMIN_IDS
 from menus.main_menu import main_menu_keyboard
-from utils.db import get_admin_stats, check_user_exists, get_all_user_ids
+from utils.db import get_admin_stats, check_user_exists, get_all_user_ids, mark_user_blocked
 from handlers.states import (
     ADMIN_PANEL_MAIN, ADMIN_MSG_USER_ID, ADMIN_MSG_TEXT,
     ADMIN_BROADCAST_INPUT, ADMIN_BROADCAST_CONFIRM
@@ -18,9 +18,12 @@ def admin_menu_markup():
         ],
         [
             InlineKeyboardButton("📢 Broadcast All", callback_data="admin_broadcast"),
-            InlineKeyboardButton("🔙 Refresh Menu", callback_data="admin_home")
+            InlineKeyboardButton("🧹 Clean Blocked", callback_data="admin_clean_blocked")
         ],
-        [InlineKeyboardButton("🏠 Exit Admin", callback_data="admin_exit")]
+        [
+            InlineKeyboardButton("🔙 Refresh Menu", callback_data="admin_home"),
+            InlineKeyboardButton("🏠 Exit Admin", callback_data="admin_exit")
+        ]
     ])
 
 async def start_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,16 +48,17 @@ async def handle_check_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    total_users, total_revenue, active_esims, expired_esims = get_admin_stats()
+    # 🎯 UPDATED to include blocked_users
+    total_users, total_revenue, active_esims, expired_esims, blocked_users = get_admin_stats()
     
-    # Get the current time for the refresh stamp
     from datetime import datetime
     now_time = datetime.now().strftime("%H:%M:%S")
     
     text = (
         "📊 <b>Live Store Statistics</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"👥 <b>Total Users:</b> {total_users}\n"
+        f"👥 <b>Active Users:</b> {total_users}\n"
+        f"🚫 <b>Blocked/Removed:</b> {blocked_users}\n"
         f"💰 <b>Total Revenue:</b> ${total_revenue:.2f}\n\n"
         f"🟢 <b>Active eSIMs:</b> {active_esims}\n"
         f"🔴 <b>Expired eSIMs:</b> {expired_esims}\n"
@@ -65,13 +69,53 @@ async def handle_check_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         await query.edit_message_text(text, reply_markup=admin_menu_markup(), parse_mode="HTML")
     except Exception as e:
-        # If the text is exactly the same (e.g. double clicked in the same second), just silently ignore it
-        if "not modified" in str(e).lower():
-            pass
-        else:
+        if "not modified" not in str(e).lower():
             raise e
             
     return ADMIN_PANEL_MAIN
+
+
+# --- BACKGROUND CLEANUP TASK ---
+async def clean_blocked_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_ids = get_all_user_ids()
+    
+    context.job_queue.run_once(cleanup_background_job, 1, data={'admin_chat_id': query.message.chat_id, 'user_ids': user_ids})
+    
+    await query.edit_message_text(
+        "🧹 <b>Background Cleanup Started!</b>\n\nThe bot is silently pinging all users. It will not freeze, and you will receive a report when finished.", 
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="admin_home")]]), 
+        parse_mode="HTML"
+    )
+    return ADMIN_PANEL_MAIN
+
+async def cleanup_background_job(context: ContextTypes.DEFAULT_TYPE):
+    data = context.job.data
+    admin_chat_id, user_ids = data['admin_chat_id'], data['user_ids']
+    
+    blocked, active = 0, 0
+    for u_id in user_ids:
+        try:
+            # Silent action that throws a Forbidden error if blocked
+            await context.bot.send_chat_action(chat_id=u_id, action="typing")
+            active += 1
+            await asyncio.sleep(0.05)
+        except Forbidden:
+            mark_user_blocked(u_id)
+            blocked += 1
+        except Exception:
+            pass # Ignore random network drops
+            
+    text = (
+        f"🧹 <b>Cleanup Complete!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🚫 <b>New Blocked Users Removed:</b> {blocked}\n"
+        f"👥 <b>Healthy Active Users:</b> {active}\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+    await context.bot.send_message(chat_id=admin_chat_id, text=text, parse_mode="HTML")
+
 
 # --- MESSAGE A USER FLOW ---
 async def start_message_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,27 +155,26 @@ async def receive_message_text(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = update.effective_message
     
     try:
-        # 1. Did the admin send a Photo?
         if msg.photo:
             photo_id = msg.photo[-1].file_id
             caption = f"🔔 <b>Message from Admin:</b>\n\n{msg.caption}" if msg.caption else "🔔 <b>Message from Admin</b>"
             await context.bot.send_photo(chat_id=target_id, photo=photo_id, caption=caption, parse_mode="HTML")
-            
-        # 2. Did the admin send a Video?
         elif msg.video:
             video_id = msg.video.file_id
             caption = f"🔔 <b>Message from Admin:</b>\n\n{msg.caption}" if msg.caption else "🔔 <b>Message from Admin</b>"
             await context.bot.send_video(chat_id=target_id, video=video_id, caption=caption, parse_mode="HTML")
-            
-        # 3. Just normal Text
         elif msg.text:
             await context.bot.send_message(chat_id=target_id, text=f"🔔 <b>Message from Admin:</b>\n\n{msg.text}", parse_mode="HTML")
             
         await msg.reply_text("✅ Message delivered successfully!")
+    except Forbidden:
+        mark_user_blocked(target_id)
+        await msg.reply_text("❌ Failed. User has blocked the bot. They have been removed from the active list.")
     except Exception as e:
         await msg.reply_text(f"❌ Failed to deliver message. Error: {e}")
         
     return await start_admin_panel(update, context)
+
 
 # --- GLOBAL BROADCAST FLOW ---
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146,17 +189,19 @@ async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADMIN_BROADCAST_INPUT
 
 async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Captures the broadcast payload (handles text, photos, and photo captions)."""
     msg = update.effective_message
     
-    # 🎯 Capture text or photo details
     if msg.photo:
-        # Get the highest resolution version of the photo
         context.user_data['broadcast_photo'] = msg.photo[-1].file_id
         context.user_data['broadcast_text'] = msg.caption or ""
         preview_type = "🖼️ PHOTO WITH CAPTION" if msg.caption else "🖼️ PURE PHOTO (NO TEXT)"
+    elif msg.video:
+        context.user_data['broadcast_video'] = msg.video.file_id
+        context.user_data['broadcast_text'] = msg.caption or ""
+        preview_type = "🎥 VIDEO WITH CAPTION" if msg.caption else "🎥 PURE VIDEO (NO TEXT)"
     else:
         context.user_data['broadcast_photo'] = None
+        context.user_data['broadcast_video'] = None
         context.user_data['broadcast_text'] = msg.text
         preview_type = "📝 TEXT ONLY"
 
@@ -175,14 +220,10 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton("❌ Cancel & Exit", callback_data="admin_home")]
     ])
 
-    # If it's a photo, show them the exact image preview with the verification button
-    if context.user_data['broadcast_photo']:
-        await msg.reply_photo(
-            photo=context.user_data['broadcast_photo'],
-            caption=preview_message,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+    if context.user_data.get('broadcast_photo'):
+        await msg.reply_photo(photo=context.user_data['broadcast_photo'], caption=preview_message[:1024], reply_markup=keyboard, parse_mode="HTML")
+    elif context.user_data.get('broadcast_video'):
+        await msg.reply_video(video=context.user_data['broadcast_video'], caption=preview_message[:1024], reply_markup=keyboard, parse_mode="HTML")
     else:
         await msg.reply_text(preview_message, reply_markup=keyboard, parse_mode="HTML")
 
@@ -190,92 +231,92 @@ async def receive_broadcast_text(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Dispatches the broadcast payload to every user in the database."""
     query = update.callback_query
-    await query.answer("🚀 Dispatching broadcast...")
-
-    from utils.db import get_all_user_ids
+    await query.answer()
+    
     user_ids = get_all_user_ids()
     
-    broadcast_text = context.user_data.get('broadcast_text')
-    broadcast_photo = context.user_data.get('broadcast_photo')
-    broadcast_video = context.user_data.get('broadcast_video')
-
-    # 🎯 THE FIX: Delete the photo preview instead of trying to edit it!
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-        
-    # Send a fresh text message for the loading status
-    await context.bot.send_message(
-        chat_id=query.message.chat_id, 
-        text=f"⏳ Sending message to {len(user_ids)} users... Please wait.", 
-        parse_mode="HTML"
-    )
-
-    success_count = 0
-    fail_count = 0
-
-    # 🛡️ SAFETY: Telegram caps media captions at 1024 characters. This prevents crashes.
-    safe_caption = broadcast_text[:1024] if broadcast_text else None
-
-    for u_id in user_ids:
-        try:
-            # 🎯 Dynamically send photo, video, or text
-            if broadcast_photo:
-                await context.bot.send_photo(
-                    chat_id=u_id,
-                    photo=broadcast_photo,
-                    caption=safe_caption,
-                    parse_mode="HTML"
-                )
-            elif broadcast_video:
-                await context.bot.send_video(
-                    chat_id=u_id,
-                    video=broadcast_video,
-                    caption=safe_caption,
-                    parse_mode="HTML"
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=u_id,
-                    text=broadcast_text,
-                    parse_mode="HTML"
-                )
-            success_count += 1
-            await asyncio.sleep(0.05) # Prevent Telegram API flood limitations
-        except Exception:
-            # 🛡️ FALLBACK: If HTML formatting has a typo, send it without HTML so it doesn't fail
-            try:
-                if broadcast_photo:
-                    await context.bot.send_photo(chat_id=u_id, photo=broadcast_photo, caption=safe_caption)
-                elif broadcast_video:
-                    await context.bot.send_video(chat_id=u_id, video=broadcast_video, caption=safe_caption)
-                else:
-                    await context.bot.send_message(chat_id=u_id, text=broadcast_text)
-                success_count += 1
-                await asyncio.sleep(0.05)
-            except Exception:
-                fail_count += 1
-
+    # 🎯 PREPARE BACKGROUND JOB PAYLOAD
+    payload = {
+        'admin_chat_id': query.message.chat_id,
+        'broadcast_text': context.user_data.get('broadcast_text'),
+        'broadcast_photo': context.user_data.get('broadcast_photo'),
+        'broadcast_video': context.user_data.get('broadcast_video'),
+        'user_ids': user_ids
+    }
+    
+    # 🚀 DISPATCH TO BACKGROUND (Frees up the bot instantly)
+    context.job_queue.run_once(broadcast_background_job, 1, data=payload)
+    
     # Cleanup memory state values
     context.user_data.pop('broadcast_text', None)
     context.user_data.pop('broadcast_photo', None)
     context.user_data.pop('broadcast_video', None)
 
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+        
+    await context.bot.send_message(
+        chat_id=query.message.chat_id, 
+        text=f"🚀 <b>Broadcast Started!</b>\n\nDispatching to {len(user_ids)} users in the background. The bot will not freeze. You will receive a receipt here when it finishes.", 
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="admin_home")]]), 
+        parse_mode="HTML"
+    )
+    return ADMIN_PANEL_MAIN
+
+
+async def broadcast_background_job(context: ContextTypes.DEFAULT_TYPE):
+    """The silent worker that actually sends the messages without freezing the bot."""
+    data = context.job.data
+    admin_chat_id = data['admin_chat_id']
+    b_text = data['broadcast_text']
+    b_photo = data['broadcast_photo']
+    b_video = data['broadcast_video']
+    user_ids = data['user_ids']
+    
+    success, fail, auto_blocked = 0, 0, 0
+    safe_caption = b_text[:1024] if b_text else None
+
+    for u_id in user_ids:
+        try:
+            if b_photo: 
+                await context.bot.send_photo(chat_id=u_id, photo=b_photo, caption=safe_caption, parse_mode="HTML")
+            elif b_video: 
+                await context.bot.send_video(chat_id=u_id, video=b_video, caption=safe_caption, parse_mode="HTML")
+            else: 
+                await context.bot.send_message(chat_id=u_id, text=b_text, parse_mode="HTML")
+            success += 1
+            await asyncio.sleep(0.05)
+        except Forbidden:
+            # 🎯 DETECTED BLOCKED USER - Mark them automatically
+            mark_user_blocked(u_id)
+            auto_blocked += 1
+        except Exception:
+            # HTML Fallback
+            try:
+                if b_photo: await context.bot.send_photo(chat_id=u_id, photo=b_photo, caption=safe_caption)
+                elif b_video: await context.bot.send_video(chat_id=u_id, video=b_video, caption=safe_caption)
+                else: await context.bot.send_message(chat_id=u_id, text=b_text)
+                success += 1
+                await asyncio.sleep(0.05)
+            except Forbidden:
+                mark_user_blocked(u_id)
+                auto_blocked += 1
+            except Exception:
+                fail += 1
+
     summary = (
         f"📢 <b>Broadcast Delivery Complete</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 <b>Successfully Sent:</b> <code>{success_count}</code>\n"
-        f"🔴 <b>Blocked/Failed:</b> <code>{fail_count}</code>\n"
+        f"🟢 <b>Sent Successfully:</b> <code>{success}</code>\n"
+        f"🚫 <b>Auto-Removed (Blocked Bot):</b> <code>{auto_blocked}</code>\n"
+        f"🔴 <b>Network Fails:</b> <code>{fail}</code>\n"
         f"━━━━━━━━━━━━━━━━━━"
     )
-    
-    # Send summary back to admin panel view
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="admin_home")]])
-    await context.bot.send_message(chat_id=query.message.chat_id, text=summary, reply_markup=keyboard, parse_mode="HTML")
-    return ADMIN_PANEL_MAIN
+    await context.bot.send_message(chat_id=admin_chat_id, text=summary, parse_mode="HTML")
+
 
 # --- NAVIGATION ---
 async def exit_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -41,6 +41,7 @@ def init_db():
                 cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_topic_id BIGINT;")
                 cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS support_topic_id BIGINT;")
                 cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_activated BOOLEAN DEFAULT FALSE;")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE;")
 
                 # 2. ORDERS TABLE
                 cur.execute("""
@@ -147,11 +148,11 @@ def add_user(user_id: int, username: str):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO users (user_id, username)
-                VALUES (%s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username;
+                INSERT INTO users (user_id, username, is_blocked)
+                VALUES (%s, %s, FALSE)
+                ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, is_blocked = FALSE;
             """, (user_id, username))
-        conn.commit()    
+        conn.commit()
         
 def is_order_id_unique(order_id):
     """Checks the database to ensure an ID hasn't been used yet."""
@@ -450,20 +451,22 @@ def get_admin_stats():
     """Fetches global statistics for the admin dashboard."""
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM users")
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_blocked = FALSE")
             total_users = cur.fetchone()[0]
+            
+            cur.execute("SELECT COUNT(*) FROM users WHERE is_blocked = TRUE")
+            blocked_users = cur.fetchone()[0]
             
             cur.execute("SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE status IN ('completed', 'mempool_credited')")
             total_revenue = cur.fetchone()[0]
             
-            # Count Active and Expired eSIMs
             cur.execute("SELECT COUNT(*) FROM orders WHERE status = 'delivered'")
             active_esims = cur.fetchone()[0]
             
             cur.execute("SELECT COUNT(*) FROM orders WHERE status = 'expired'")
             expired_esims = cur.fetchone()[0]
             
-            return total_users, total_revenue, active_esims, expired_esims
+            return total_users, total_revenue, active_esims, expired_esims, blocked_users
 
 def check_user_exists(user_id):
     """Verifies if a user ID is actually in the database."""
@@ -476,8 +479,15 @@ def get_all_user_ids():
     """Fetches every registered user ID for global broadcasts."""
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM users")
-            return [row[0] for row in cur.fetchall()]        
+            cur.execute("SELECT user_id FROM users WHERE is_blocked = FALSE")
+            return [row[0] for row in cur.fetchall()]   
+        
+def mark_user_blocked(user_id):
+    """Flags a user as blocked if Telegram rejects a message to them."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET is_blocked = TRUE WHERE user_id = %s", (user_id,))
+        conn.commit()          
 
 def close_db():
     """Closes the connection pool gracefully."""

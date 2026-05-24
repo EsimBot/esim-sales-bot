@@ -30,9 +30,10 @@ from handlers.admin_fulfillment import (
 
 # 🎯 The missing imports for the Admin Panel
 from handlers.admin_panel import (
-    start_admin_panel, handle_check_stats, start_message_user,
+    confirm_poll_broadcast, start_admin_panel, handle_check_stats, start_message_user,
     receive_message_user_id, receive_message_text, start_broadcast,
-    receive_broadcast_text, confirm_broadcast,clean_blocked_users,exit_admin
+    receive_broadcast_text, confirm_broadcast,clean_blocked_users,exit_admin,
+    start_poll_wizard, receive_poll_question, receive_poll_options, confirm_poll
 )
 
 # All States
@@ -42,7 +43,8 @@ from handlers.states import (
     WAITING_FOR_PAYMENT, INTERCEPTING, SELECT_RENEWAL_TYPE,
     ADMIN_SMDP, ADMIN_ACTIVATION, ADMIN_QR, ADMIN_CONFIRM,
     ADMIN_PANEL_MAIN, ADMIN_MSG_USER_ID, ADMIN_MSG_TEXT,
-    ADMIN_BROADCAST_INPUT, ADMIN_BROADCAST_CONFIRM
+    ADMIN_BROADCAST_INPUT, ADMIN_BROADCAST_CONFIRM,
+    ADMIN_POLL_QUESTION, ADMIN_POLL_OPTIONS, ADMIN_POLL_CONFIRM
 )
 
 async def debug_fallback(update, context):
@@ -155,6 +157,7 @@ control_panel_router = ConversationHandler(
             CallbackQueryHandler(handle_check_stats, pattern="^admin_stats$"),
             CallbackQueryHandler(start_message_user, pattern="^admin_msg_user$"),
             CallbackQueryHandler(start_broadcast, pattern="^admin_broadcast$"),
+            CallbackQueryHandler(start_poll_wizard, pattern="^admin_create_poll$"),
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$"),
             CallbackQueryHandler(clean_blocked_users, pattern="^admin_clean_blocked$"),
             CallbackQueryHandler(exit_admin, pattern="^admin_exit$")
@@ -179,6 +182,18 @@ control_panel_router = ConversationHandler(
             CallbackQueryHandler(start_admin_panel, pattern="^admin_home$"),
             # 🎯 FIX 2: Allow you to add captions while looking at the preview screen without getting stuck
             MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, receive_broadcast_text)
+        ],
+        ADMIN_POLL_QUESTION: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_poll_question),
+            CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
+        ],
+        ADMIN_POLL_OPTIONS: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_poll_options),
+            CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
+        ],
+        ADMIN_POLL_CONFIRM: [
+            CallbackQueryHandler(confirm_poll_broadcast, pattern="^confirm_poll_send$"),
+            CallbackQueryHandler(start_admin_panel, pattern="^admin_home$")
         ]
     },
     fallbacks=[CommandHandler("admin", start_admin_panel)],

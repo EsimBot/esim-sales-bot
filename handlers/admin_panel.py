@@ -7,7 +7,8 @@ from menus.main_menu import main_menu_keyboard
 from utils.db import get_admin_stats, check_user_exists, get_all_user_ids, mark_user_blocked
 from handlers.states import (
     ADMIN_PANEL_MAIN, ADMIN_MSG_USER_ID, ADMIN_MSG_TEXT,
-    ADMIN_BROADCAST_INPUT, ADMIN_BROADCAST_CONFIRM
+    ADMIN_BROADCAST_INPUT, ADMIN_BROADCAST_CONFIRM,ADMIN_POLL_QUESTION,
+    ADMIN_POLL_OPTIONS, ADMIN_POLL_CONFIRM
 )
 
 def admin_menu_markup():
@@ -20,11 +21,17 @@ def admin_menu_markup():
             InlineKeyboardButton("📢 Broadcast All", callback_data="admin_broadcast"),
             InlineKeyboardButton("🧹 Clean Blocked", callback_data="admin_clean_blocked")
         ],
+        [   InlineKeyboardButton("📊 Create Live Poll", callback_data="admin_create_poll")
+         
+        ],
+        
         [
             InlineKeyboardButton("🔙 Refresh Menu", callback_data="admin_home"),
             InlineKeyboardButton("🏠 Exit Admin", callback_data="admin_exit")
         ]
     ])
+    
+
 
 async def start_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -318,6 +325,141 @@ async def broadcast_background_job(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=admin_chat_id, text=summary, parse_mode="HTML")
 
 
+
+# --- INTERACTIVE POLL BUILDER WIZARD ---
+
+async def start_poll_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 1: Ask for the Poll Question."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data['poll_building'] = {'question': '', 'options': []}
+    
+    btns = [[InlineKeyboardButton("🔙 Cancel", callback_data="admin_home")]]
+    await query.edit_message_text(
+        "📊 <b>Interactive Poll Builder</b>\n\nStep 1: Please type the <b>Question</b> for your poll:",
+        reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML"
+    )
+    return ADMIN_POLL_QUESTION
+
+async def receive_poll_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: Save question and instruct how to provide options."""
+    question_text = update.message.text.strip()
+    context.user_data['poll_building']['question'] = question_text
+    
+    btns = [[InlineKeyboardButton("❌ Cancel & Exit", callback_data="admin_home")]]
+    await update.message.reply_text(
+        f"✅ <b>Question Saved:</b>\n<i>\"{question_text}\"</i>\n\n"
+        f"Step 2: Provide the answer options.\n"
+        f"Please send your choices **one message at a time**.\n\n"
+        f"<i>💡 Type the word <b>done</b> when you are finished adding options (Minimum 2, Maximum 10).</i>",
+        reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML"
+    )
+    return ADMIN_POLL_OPTIONS
+
+async def receive_poll_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 3: Collect options sequentially until admin types 'done'."""
+    input_text = update.message.text.strip()
+    poll_data = context.user_data.get('poll_building')
+    
+    # Check if admin is finished entering options
+    if input_text.lower() == 'done':
+        if len(poll_data['options']) < 2:
+            await update.message.reply_text("⚠️ You must provide at least <b>2 options</b> before concluding. Send another choice:")
+            return ADMIN_POLL_OPTIONS
+            
+        # Show configuration preview card
+        options_list = "\n".join([f"🔹 {opt}" for opt in poll_data['options']])
+        preview_text = (
+            f"📊 <b>Poll Broadcast Preview</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"❓ <b>Question:</b> {poll_data['question']}\n\n"
+            f"📋 <b>Options:</b>\n{options_list}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"Do you want to dispatch this native poll to ALL active users in the background?"
+        )
+        
+        btns = [
+            [InlineKeyboardButton("🚀 Launch Poll Broadcast", callback_data="confirm_poll_send")],
+            [InlineKeyboardButton("❌ Cancel & Discard", callback_data="admin_home")]
+        ]
+        await update.message.reply_text(preview_text, reply_markup=InlineKeyboardMarkup(btns), parse_mode="HTML")
+        return ADMIN_POLL_CONFIRM
+
+    # Add option up to Telegram's maximum 10 constraints
+    if len(poll_data['options']) >= 10:
+        await update.message.reply_text("🛑 Maximum threshold reached (10 choices total). Please type <b>done</b> to proceed.")
+        return ADMIN_POLL_OPTIONS
+
+    poll_data['options'].append(input_text)
+    current_count = len(poll_data['options'])
+    
+    await update.message.reply_text(f"✅ Option {current_count} added: <code>{input_text}</code>\n<i>Send next choice, or type <b>done</b> if ready.</i>", parse_mode="HTML")
+    return ADMIN_POLL_OPTIONS
+
+async def confirm_poll_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 4: Dispatch collected configurations to our background job queue manager."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_ids = get_all_user_ids()
+    poll_data = context.user_data.get('poll_building')
+    
+    payload = {
+        'admin_chat_id': query.message.chat_id,
+        'question': poll_data['question'],
+        'options': poll_data['options'],
+        'user_ids': user_ids
+    }
+    
+    # 🚀 Run asynchronously through background scheduler
+    context.job_queue.run_once(poll_background_job, 1, data=payload)
+    context.user_data.pop('poll_building', None)
+    
+    try: await query.message.delete()
+    except: pass
+    
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=f"🚀 <b>Poll Broadcast Dispatched!</b>\n\nDistributing dynamically to {len(user_ids)} users in the background. The bot will remain responsive, and a delivery report will materialize when finished.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="admin_home")]]),
+        parse_mode="HTML"
+    )
+    return ADMIN_PANEL_MAIN
+
+async def poll_background_job(context: ContextTypes.DEFAULT_TYPE):
+    """Asynchronous worker that distributes the custom poll without locking interface interactions."""
+    data = context.job.data
+    admin_chat_id = data['admin_chat_id']
+    question = data['question']
+    options = data['options']
+    user_ids = data['user_ids']
+    
+    success, fail = 0, 0
+    
+    for u_id in user_ids:
+        try:
+            await context.bot.send_poll(
+                chat_id=u_id,
+                question=question,
+                options=options,
+                is_anonymous=True # Set to False if you want to trace users' responses
+            )
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            fail += 1
+            
+    summary = (
+        f"📊 <b>Poll Delivery Campaign Concluded</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 <b>Delivered Perfectly:</b> <code>{success}</code>\n"
+        f"🔴 <b>Undelivered/Errors:</b> <code>{fail}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+    await context.bot.send_message(chat_id=admin_chat_id, text=summary, parse_mode="HTML")
+    
+    
 # --- NAVIGATION ---
 async def exit_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
